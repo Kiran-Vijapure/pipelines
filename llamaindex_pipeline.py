@@ -37,6 +37,7 @@ class Pipeline:
                 "llm_end_point": os.getenv("LLM_END_POINT", "dummy-llm-end-point"),
                 "llm_api_key": os.getenv("LLM_API_KEY", "dummy-llm-api-key"),
                 "openai_apikey": os.getenv("APIKEY", "dummy-openai-key"),
+                "user_prompt": os.getenv("USER_PROMPT", "either-path-or-string")
             }
         )
 
