@@ -62,7 +62,7 @@ class Pipeline:
         print("**"*10)
         retriever = self.index.as_retriever(similarity_top_k=3)
         nodes = retriever.retrieve(user_message)
-        print(nodes[0].__dict__.keys())
+        print(nodes[0].node.__dict__.keys())
         print("**"*10)
 
         query_engine = self.index.as_query_engine(streaming=True)
