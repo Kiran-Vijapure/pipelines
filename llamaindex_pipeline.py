@@ -9,6 +9,7 @@ requirements: llama-index
 """
 
 import os
+from typing import Optional
 from pydantic import BaseModel
 from schemas import OpenAIChatMessage
 from typing import List, Union, Generator, Iterator
@@ -16,13 +17,19 @@ from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
 
 
 class Pipeline:
+    class Valves(BaseModel):
+        llm_end_point: Optional[str] = "optional-llm-end-point"
+        llm_api_key: Optional[str] = "optinal-llm-api-key"
+
     def __init__(self):
         self.documents = None
         self.index = None
-
-    class Valves(BaseModel):
-        llm_end_point: str = None
-        llm_api_key: str = None
+        self.valves = self.Valves(
+            **{
+                "llm_end_point": os.getenv("LLM_END_POINT", "llm-end-point"),
+                "llm_api_key": os.getenv("LLM_API_KEY", "llm-api-key"),
+            }
+        )
 
     async def on_startup(self):
 
@@ -52,12 +59,6 @@ class Pipeline:
         print(messages)
         print(user_message)
 
-        self.valves = self.Valves(
-            **{
-                "llm_end_point": os.getenv("LLM_END_POINT", "llm-end-point"),
-                "llm_api_key": os.getenv("LLM_API_KEY", "llm-api-key")
-            }
-        )
 
         query_engine = self.index.as_query_engine(streaming=True)
         response = query_engine.query(user_message)
