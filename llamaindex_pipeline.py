@@ -115,12 +115,13 @@ class Pipeline:
 
         os.environ["OPENAI_API_KEY"] = self.valves["openai_apikey"]
         self.documents = SimpleDirectoryReader("/app/maha").load_data()
+
         self.index = VectorStoreIndex.from_documents(self.documents)
         self.retriever = self.index.as_retriever(similarity_top_k=3)
         self.user_prompt = self.get_prompt()
         # This function is called when the server is started.
         # pass
-        
+
         # weaviate_uri: Optional[str] = os.getenv("WEAVIATE_URI", "dummy-uri")
         # weaviate_auth_apikey: Optional[str] = os.getenv("WEAVIATE_AUTH_APIKEY", "dummy-auth-key"),
 
