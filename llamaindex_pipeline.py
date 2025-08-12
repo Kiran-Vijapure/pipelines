@@ -73,7 +73,6 @@ class Pipeline:
         headers = {"Authorization": self.valves["llm_api_key"]}
 
         _htx_cli = httpx.Client(verify=False) if llmbase.startswith("https") else None
-        )
         _htx_acli = (
             httpx.AsyncClient(verify=False) if llmbase.startswith("https") else None
         )
