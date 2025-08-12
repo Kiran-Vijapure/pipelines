@@ -59,7 +59,8 @@ class Pipeline:
 
         # print(messages)
         # print(user_message)
-        print(type(self.documents[0]))
+        print(self.documents[0].__dict__.keys())
+        print(self.documents[0].text)
         print("**"*10)
 
 
