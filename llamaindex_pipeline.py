@@ -8,8 +8,11 @@ description: A pipeline for retrieving relevant information from a knowledge bas
 requirements: llama-index
 """
 
-from typing import List, Union, Generator, Iterator
+import os
+from pydantic import BaseModel
 from schemas import OpenAIChatMessage
+from typing import List, Union, Generator, Iterator
+from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
 
 
 class Pipeline:
@@ -17,18 +20,24 @@ class Pipeline:
         self.documents = None
         self.index = None
 
+    class Valves(BaseModel):
+        llm_end_point: str = None
+        llm_api_key: str = None
+
     async def on_startup(self):
-        import os
 
         # Set the OpenAI API key
         os.environ["OPENAI_API_KEY"] = os.getenv("APIKEY")
 
-        from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
 
         self.documents = SimpleDirectoryReader("/app/maha").load_data()
         self.index = VectorStoreIndex.from_documents(self.documents)
         # This function is called when the server is started.
         pass
+
+        # Intialize llm
+        # Get weaviate vectorstore client
+
 
     async def on_shutdown(self):
         # This function is called when the server is stopped.
@@ -47,3 +56,9 @@ class Pipeline:
         response = query_engine.query(user_message)
 
         return response.response_gen
+
+
+        # Get documents
+        # Create prompt
+        # Query to llm 
+        # return response.
