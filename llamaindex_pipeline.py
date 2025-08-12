@@ -38,7 +38,7 @@ class Pipeline:
 
 
         self.documents = SimpleDirectoryReader("/app/maha").load_data()
-        print(self.documents[0])
+        print(self.documents)
         print("**"*10)
         self.index = VectorStoreIndex.from_documents(self.documents)
         # This function is called when the server is started.
