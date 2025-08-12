@@ -25,7 +25,7 @@ class Pipeline:
 
         from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
 
-        self.documents = SimpleDirectoryReader("/home/kiranvijapure/maha").load_data()
+        self.documents = SimpleDirectoryReader("/app/maha").load_data()
         self.index = VectorStoreIndex.from_documents(self.documents)
         # This function is called when the server is started.
         pass
