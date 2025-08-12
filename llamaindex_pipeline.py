@@ -57,9 +57,9 @@ class Pipeline:
         # This is where you can add your custom RAG pipeline.
         # Typically, you would retrieve relevant information from your knowledge base and synthesize it to generate a response.
 
-        print(messages)
-        print(user_message)
-        print(self.documents[0])
+        # print(messages)
+        # print(user_message)
+        print(type(self.documents[0]))
         print("**"*10)
 
 
