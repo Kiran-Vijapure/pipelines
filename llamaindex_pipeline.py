@@ -41,12 +41,12 @@ class Pipeline:
         )
 
     def get_model_name(self,):
-        headers = {"Authorization": self.valves["llm_api_key"]}
+        headers = {"Authorization": self.valves.llm_api_key}
 
         with httpx.Client(verify=False) as _htx_cli:
             client = openai.OpenAI(
-                base_url=self.valves["llm_end_point"],
-                api_key=self.valves["llm_api_key"],
+                base_url=self.valves.llm_end_point,
+                api_key=self.valves.llm_api_key,
                 default_headers=headers,
                 http_client=_htx_cli,
             )
@@ -69,8 +69,8 @@ class Pipeline:
             )
 
     def get_llm(self, ):
-        llmbase = self.valves["llm_end_point"]
-        headers = {"Authorization": self.valves["llm_api_key"]}
+        llmbase = self.valves.llm_end_point
+        headers = {"Authorization": self.valves.llm_api_key}
 
         _htx_cli = httpx.Client(verify=False) if llmbase.startswith("https") else None
         _htx_acli = (
@@ -80,7 +80,7 @@ class Pipeline:
         return OpenAILike(
             model=self.get_model_name(),
             api_base=llmbase,
-            api_key=self.valves["llm_api_key"],
+            api_key=self.valves.llm_api_key,
             temperature=0,
             is_chat_model=True,
             # max_tokens=max_tokens,
@@ -91,11 +91,11 @@ class Pipeline:
         )
 
     def get_prompt(self):
-        if os.path.exists(self.valves["user_prompt"]):
-            with open(self.valves["user_prompt"], "r") as f:
+        if os.path.exists(self.valves.user_prompt):
+            with open(self.valves.user_prompt, "r") as f:
                 self.user_prompt = f.read()
         else:
-            self.user_prompt = self.valves["user_prompt"]
+            self.user_prompt = self.valves.user_prompt
 
     def set_prompt(self, nodes: List[Any], query: str) -> str:
         text_list = [ node.text for node in nodes ]
@@ -108,11 +108,11 @@ class Pipeline:
 
         # Set the OpenAI API key
         # os.environ["OPENAI_API_KEY"] = os.getenv("APIKEY")
-        # os.environ["OPENAI_API_KEY"] = self.valves["openai_apikey"]
+        # os.environ["OPENAI_API_KEY"] = self.valves.openai_apikey
         # weaviate_uri: Optional[str] = os.getenv("WEAVIATE_URI", "dummy-uri")
         # weaviate_auth_apikey: Optional[str] = os.getenv("WEAVIATE_AUTH_APIKEY", "dummy-auth-key"),
 
-        os.environ["OPENAI_API_KEY"] = self.valves["openai_apikey"]
+        os.environ["OPENAI_API_KEY"] = self.valves.openai_apikey
         self.documents = SimpleDirectoryReader("/app/maha").load_data()
 
         self.index = VectorStoreIndex.from_documents(self.documents)
