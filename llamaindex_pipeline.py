@@ -38,8 +38,7 @@ class Pipeline:
 
 
         self.documents = SimpleDirectoryReader("/app/maha").load_data()
-        print(self.documents)
-        print("**"*10)
+
         self.index = VectorStoreIndex.from_documents(self.documents)
         # This function is called when the server is started.
         pass
@@ -60,6 +59,8 @@ class Pipeline:
 
         print(messages)
         print(user_message)
+        print(self.documents[0])
+        print("**"*10)
 
 
         query_engine = self.index.as_query_engine(streaming=True)
