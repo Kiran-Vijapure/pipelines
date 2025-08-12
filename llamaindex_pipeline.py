@@ -58,6 +58,7 @@ class Pipeline:
         # Typically, you would retrieve relevant information from your knowledge base and synthesize it to generate a response.
 
         # print(messages)
+        print("**"*10)
         print(user_message)
         # retriever = self.index.as_retriever(similarity_top_k=3)
         # retriever.retrieve(query)
