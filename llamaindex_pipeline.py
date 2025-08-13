@@ -12,20 +12,29 @@ import os
 import httpx
 import openai
 import chromadb
+import weaviate
 from pydantic import BaseModel
 from typing import Optional, Any, Dict
+from fetch_embedding_model import get_embed_model
 from llama_index.llms.openai_like import OpenAILike
 from typing import List, Union, Generator, Iterator
 from llama_index.core.chat_engine import SimpleChatEngine
+from llama_index.vector_stores.weaviate import WeaviateVectorStore
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
 
 
 class Pipeline:
     class Valves(BaseModel):
-        llm_end_point: Optional[str] = "dummy-llm-end-point"
-        llm_api_key: Optional[str] = "dummy-llm-api-key"
+        llm_end_point: Optional[str] = "dummy"
+        llm_api_key: Optional[str] = "dummy"
+        emb_end_point: Optional[str] = "dummy"
+        emb_api_key: Optional[str] = "dummy"
         # openai_apikey: Optional[str] = "dummy-openai-key"
         user_prompt: Optional[str] = "either-path-or-string"
+        dataset: str = "dummy"
+        textkey: str = "paperdocs"
+        top_k: int = 3
+
 
     def __init__(self):
         self.index: Any = None
@@ -39,7 +48,7 @@ class Pipeline:
                 "llm_end_point": os.getenv("LLM_END_POINT", "dummy-llm-end-point"),
                 "llm_api_key": os.getenv("LLM_API_KEY", "dummy-llm-api-key"),
                 # "openai_apikey": os.getenv("APIKEY", "dummy-openai-key"),
-                "user_prompt": os.getenv("USER_PROMPT", "either-path-or-string")
+                "user_prompt": os.getenv("USER_PROMPT", "either-path-or-string"),
             }
         )
 
@@ -108,7 +117,50 @@ class Pipeline:
         context = "\n".join(text_list)
         prompt = self.user_prompt.format(context=context, question=query)
         return prompt
-        
+       
+    def get_weaviate_client(self):
+        client = None
+        try:
+            http_host = os.getenv("WEAVIATE_SERVICE_HOST", "weaviate.d3x.svc.cluster.local")
+
+            http_grpc_host = os.getenv(
+                "WEAVIATE_SERVICE_HOST_GRPC", "weaviate-grpc.d3x.svc.cluster.local"
+            )
+
+            http_port = os.getenv("WEAVIATE_SERVICE_PORT", "80")
+            grpc_port = os.getenv("WEAVIATE_GRPC_SERVICE_PORT", "50051")
+
+            api_key = os.getenv("DKUBEX_API_KEY", "")
+
+            if os.getenv("WEAVIATE_AUTH_APIKEY", None) != None:
+                api_key = os.environ["WEAVIATE_AUTH_APIKEY"]
+
+            additional_headers = {"authorization": f"Bearer {api_key}"}
+            if "://" in http_host:
+                http_host = http_host.split("://")[1]
+            client = weaviate.connect_to_custom(
+                http_host=http_host,
+                http_port=int(http_port),
+                http_secure=False if int(http_port) == 80 else True,
+                grpc_host=http_grpc_host,
+                grpc_port=int(grpc_port),
+                grpc_secure=False if int(grpc_port) != 443 else True,
+                headers=additional_headers,
+                additional_config=AdditionalConfig(
+                    timeout=Timeout(init=120, query=300, insert=300)  # Values in seconds
+                ),
+            )
+
+            if not client.is_ready():
+                raise ConnectionError("Weaviate instance not ready")
+
+            return client
+
+        except Exception as e:
+            logging.error(f"Error in creating Weaviate Client. Error: {str(e)}")
+            if client:
+                client.close()
+            raise Exception(f"Error in creating Weaviate Client. Error: {str(e)}")
 
     async def on_startup(self):
 
@@ -118,16 +170,37 @@ class Pipeline:
         # weaviate_uri: Optional[str] = os.getenv("WEAVIATE_URI", "dummy-uri")
         # weaviate_auth_apikey: Optional[str] = os.getenv("WEAVIATE_AUTH_APIKEY", "dummy-auth-key"),
 
-        os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_APIKEY")
-        self.documents = SimpleDirectoryReader("/home/kiran-vijapure/pipelines/maha").load_data()
+        # os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_APIKEY")
+        # self.documents = SimpleDirectoryReader("/home/kiran-vijapure/pipelines/maha").load_data()
 
-        self.index = VectorStoreIndex.from_documents(self.documents)
-        self.retriever = self.index.as_retriever(similarity_top_k=3)
+        # self.index = VectorStoreIndex.from_documents(self.documents)
+        # self.retriever = self.index.as_retriever(similarity_top_k=3)
+
+        # Get weaviate vector store index.
+        self.weaviate_client = self.get_weaviate_client()
+        # vector_store = WeaviateVectorStore(weaviate_client=weaviate_client, index_name=class_name, text_key=textkey)
 
 
     async def on_shutdown(self):
         # This function is called when the server is stopped.
         pass
+
+
+    def get_weaviate_retriever(self):
+        embed_model = get_embed_model(self.valves.emb_end_point, self.valves.emb_api_key)
+
+        vector_store = WeaviateVectorStore(
+                        weaviate_client=weaviate_client, 
+                        index_name=f"D{self.valves.dataset}chunks",
+                        text_key=self.valves.textkey
+                    )
+        vector_index = VectorStoreIndex.from_vector_store(
+                        vector_store, 
+                        show_progress=True, 
+                        embed_model=embed_model
+                    )
+        self.retriever = vector_index.as_retriever(similarity_top_k=self.valves.top_k)
+
 
     def get_nodes(self, user_message):
         if not user_message.startswith("### Task"):
@@ -142,6 +215,7 @@ class Pipeline:
         # print(messages)
         # print(user_message)
 
+        self.get_weaviate_retriever()
         self.get_chat_engine()
         self.get_prompt()
 
