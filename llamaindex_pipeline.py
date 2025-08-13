@@ -153,8 +153,6 @@ class Pipeline:
         # response = query_engine.query(user_message)
 
         response = self.chat_engine.stream_chat(prompt)
-        print(response)
-        print("**"*10)
 
         return response.response_gen
 
