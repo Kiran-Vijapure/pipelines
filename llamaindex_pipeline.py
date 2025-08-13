@@ -13,7 +13,7 @@ import httpx
 import openai
 import chromadb
 from pydantic import BaseModel
-from schemas import OpenAIChatMessage
+# from schemas import OpenAIChatMessage
 from typing import Optional, Any, Dict
 from llama_index.llms.openai_like import OpenAILike
 from typing import List, Union, Generator, Iterator
@@ -24,7 +24,7 @@ class Pipeline:
     class Valves(BaseModel):
         llm_end_point: Optional[str] = "dummy-llm-end-point"
         llm_api_key: Optional[str] = "dummy-llm-api-key"
-        openai_apikey: Optional[str] = "dummy-openai-key"
+        # openai_apikey: Optional[str] = "dummy-openai-key"
         user_prompt: Optional[str] = "either-path-or-string"
 
     def __init__(self):
@@ -36,7 +36,7 @@ class Pipeline:
             **{
                 "llm_end_point": os.getenv("LLM_END_POINT", "dummy-llm-end-point"),
                 "llm_api_key": os.getenv("LLM_API_KEY", "dummy-llm-api-key"),
-                "openai_apikey": os.getenv("APIKEY", "dummy-openai-key"),
+                # "openai_apikey": os.getenv("APIKEY", "dummy-openai-key"),
                 "user_prompt": os.getenv("USER_PROMPT", "either-path-or-string")
             }
         )
@@ -92,10 +92,10 @@ class Pipeline:
         )
 
     def get_prompt(self):
-        if os.path.exists(self.valves.user_prompt):
+        try:
             with open(self.valves.user_prompt, "r") as f:
                 self.user_prompt = f.read()
-        else:
+        except:
             self.user_prompt = self.valves.user_prompt
 
     def set_prompt(self, nodes: List[Any], query: str) -> str:
@@ -113,12 +113,12 @@ class Pipeline:
         # weaviate_uri: Optional[str] = os.getenv("WEAVIATE_URI", "dummy-uri")
         # weaviate_auth_apikey: Optional[str] = os.getenv("WEAVIATE_AUTH_APIKEY", "dummy-auth-key"),
 
-        os.environ["OPENAI_API_KEY"] = self.valves.openai_apikey
+        os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_APIKEY")
         self.documents = SimpleDirectoryReader("/app/maha").load_data()
 
         self.index = VectorStoreIndex.from_documents(self.documents)
         self.retriever = self.index.as_retriever(similarity_top_k=3)
-        self.user_prompt = self.get_prompt()
+        # self.user_prompt = self.get_prompt()
         # This function is called when the server is started.
         # pass
 
@@ -126,7 +126,7 @@ class Pipeline:
         # weaviate_auth_apikey: Optional[str] = os.getenv("WEAVIATE_AUTH_APIKEY", "dummy-auth-key"),
 
         # Intialize llm
-        self.llm = self.get_llm()
+        # self.llm = self.get_llm()
         # Initialize chat engine. either this or directory call llm
         # Get weaviate vectorstore client       - Postponed
 
@@ -144,8 +144,19 @@ class Pipeline:
         # print(messages)
         # print(user_message)
 
-        nodes = self.retriever(user_message)
+        self.llm = self.get_llm()
+        print(f"Got llm: {self.llm}")
+
+        self.user_prompt = self.get_prompt()
+        print(f"Got user prompt: \n{self.user_prompt}")
+        print("**"*10)
+
+        nodes = self.retriever.retrieve(user_message)
+        print(f"Got nodes : {len(nodes)}")
+        print("**"*10)
         prompt = self.set_prompt(nodes, user_message)
+        print(f"Got prompt: {prompt}")
+        print("**"*10)
 
         # query_engine = self.index.as_query_engine(streaming=True)
         # response = query_engine.query(user_message)
