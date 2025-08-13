@@ -98,9 +98,6 @@ def get_openai_embedding(
 
 
 def get_embed_model(emburl: str, embkey: str) -> CustomTextEmbeddingsInference:
-    emburl = self.valves.emb_end_point
-    embkey = self.valves.emb_api_key
-
     if not emburl.startswith("http"):
         try:
             return get_openai_embedding(emburl, embkey, plcfg)
@@ -111,15 +108,16 @@ def get_embed_model(emburl: str, embkey: str) -> CustomTextEmbeddingsInference:
                 error_msg = f"Error while fetching embedding model. {e}"
                 raise Exception(error_msg)
 
+    headers = {}
     try:
         emb_inference = CustomTextEmbeddingsInference(
             model_name=emb_model,
-            base_url=base_url,
+            base_url=emburl,
             text_instruction=" ",
             query_instruction=" ",
             truncate_text=False,
-            batch_size=batch_size,
-            api_key=api_key,
+            batch_size=10,
+            api_key=embkey,
             default_headers=headers
         )
     except Exception as e:
@@ -144,6 +142,7 @@ class Pipeline:
 
 
     def __init__(self):
+        self.embed_model: Any = None
         self.index: Any = None
         self.retriever: Any = None
         self.user_prompt: str = None
@@ -158,6 +157,8 @@ class Pipeline:
                 "user_prompt": os.getenv("USER_PROMPT", "either-path-or-string"),
             }
         )
+
+        self.flag = 0
 
     def get_model_name(self,):
         headers = {"Authorization": self.valves.llm_api_key}
@@ -294,24 +295,48 @@ class Pipeline:
 
 
     def get_weaviate_retriever(self):
-        embed_model = get_embed_model(self.valves.emb_end_point, self.valves.emb_api_key)
+        if not self.embed_model:
+            self.embed_model = get_embed_model(self.valves.emb_end_point, self.valves.emb_api_key)
 
-        vector_store = WeaviateVectorStore(
-                        weaviate_client=weaviate_client, 
-                        index_name=f"D{self.valves.dataset}chunks",
-                        text_key=self.valves.textkey
-                    )
-        vector_index = VectorStoreIndex.from_vector_store(
-                        vector_store, 
-                        show_progress=True, 
-                        embed_model=embed_model
-                    )
-        self.retriever = vector_index.as_retriever(similarity_top_k=self.valves.top_k)
+        if not self.retriever:
+            vector_store = WeaviateVectorStore(
+                            weaviate_client=self.weaviate_client, 
+                            index_name=f"D{self.valves.dataset}chunks",
+                            text_key=self.valves.textkey
+                        )
+            vector_index = VectorStoreIndex.from_vector_store(
+                            vector_store, 
+                            show_progress=True, 
+                            embed_model=self.embed_model
+                        )
+            self.retriever = vector_index.as_retriever(similarity_top_k=self.valves.top_k)
 
 
     def get_nodes(self, user_message):
         if not user_message.startswith("### Task"):
             self.nodes = self.retriever.retrieve(user_message)
+            
+            # print("**"*10)
+            # print("**"*10)
+            # for no, node in enumerate(self.nodes):
+            #     print(no)
+            #     print(node)
+            #     print("--"*10)
+            #     print("--"*10)
+            #     print(node.text)
+            #     print("**"*10)
+            #     print("**"*10)
+
+
+    def rewrite_query(self, user_message: str):
+        if not user_message.startswith("### Task"):
+            rewritten_prompt = self.get_rewritten_prompt()
+            response = self.chat_engine.chat(prompt)
+
+
+    def get_chat_history(self):
+        pass
+
 
     def pipe(
         self, user_message: str, model_id: str, messages: List[dict], body: dict
@@ -319,7 +344,14 @@ class Pipeline:
         # This is where you can add your custom RAG pipeline.
         # Typically, you would retrieve relevant information from your knowledge base and synthesize it to generate a response.
 
-        # print(messages)
+        print("**"*10)
+        print("**"*10)
+        print(self.flag)
+        print(messages)
+        print(self.valves.dataset)
+        print("**"*10)
+        print("**"*10)
+        self.flag += 1
         # print(user_message)
 
         self.get_weaviate_retriever()
@@ -328,6 +360,12 @@ class Pipeline:
 
         self.get_nodes(user_message)
         prompt = self.set_prompt(user_message)
+        print("**"*10)
+        print("**"*10)
+        print(f"Prompt:\n\n{prompt}")
+        print("**"*10)
+        print("**"*10)
+
 
         # query_engine = self.index.as_query_engine(streaming=True)
         # response = query_engine.query(user_message)
