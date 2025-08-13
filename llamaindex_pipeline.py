@@ -114,7 +114,8 @@ class Pipeline:
         # weaviate_auth_apikey: Optional[str] = os.getenv("WEAVIATE_AUTH_APIKEY", "dummy-auth-key"),
 
         os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_APIKEY")
-        self.documents = SimpleDirectoryReader("/app/maha").load_data()
+        # self.documents = SimpleDirectoryReader("/app/maha").load_data()
+        self.documents = SimpleDirectoryReader("/home/kiran-vijapure/pipelines/maha").load_data()
 
         self.index = VectorStoreIndex.from_documents(self.documents)
         self.retriever = self.index.as_retriever(similarity_top_k=3)
