@@ -18,6 +18,7 @@ from typing import Optional, Any, Dict
 from llama_index.llms.openai_like import OpenAILike
 from typing import List, Union, Generator, Iterator
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
+from llama_index.core.simple import SimpleChatEngine
 
 
 class Pipeline:
@@ -28,10 +29,12 @@ class Pipeline:
         user_prompt: Optional[str] = "either-path-or-string"
 
     def __init__(self):
-        self.documents: List[Any] = None
         self.index: Any = None
-        self.llm: Any = None
+        self.retriever: Any = None
         self.user_prompt: str = None
+        self.nodes: List[Any] = None
+        self.documents: List[Any] = None
+        self.chat_engine: SimpleChatEngine = None
         self.valves: Dict[str, Any] = self.Valves(
             **{
                 "llm_end_point": os.getenv("LLM_END_POINT", "dummy-llm-end-point"),
@@ -69,7 +72,7 @@ class Pipeline:
                 "Unable to retrieve model ID. API response format may have changed."
             )
 
-    def get_llm(self, ):
+    def get_chat_engine(self, ):
         llmbase = self.valves.llm_end_point
         headers = {"Authorization": self.valves.llm_api_key}
 
@@ -78,7 +81,7 @@ class Pipeline:
             httpx.AsyncClient(verify=False) if llmbase.startswith("https") else None
         )
 
-        return OpenAILike(
+        llm = OpenAILike(
             model=self.get_model_name(),
             api_base=llmbase,
             api_key=self.valves.llm_api_key,
@@ -91,6 +94,9 @@ class Pipeline:
             async_http_client=_htx_acli,
         )
 
+        self.chat_engine = SimpleChatEngine.from_defaults(llm=llm)
+
+
     def get_prompt(self):
         try:
             with open(self.valves.user_prompt, "r") as f:
@@ -98,8 +104,8 @@ class Pipeline:
         except:
             self.user_prompt = self.valves.user_prompt
 
-    def set_prompt(self, nodes: List[Any], query: str) -> str:
-        text_list = [ node.text for node in nodes ]
+    def set_prompt(self,query: str) -> str:
+        text_list = [ node.text for node in self.nodes ]
         context = "\n".join(text_list)
         prompt = self.user_prompt.format(context=context, question=query)
         return prompt
@@ -114,27 +120,19 @@ class Pipeline:
         # weaviate_auth_apikey: Optional[str] = os.getenv("WEAVIATE_AUTH_APIKEY", "dummy-auth-key"),
 
         os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_APIKEY")
-        # self.documents = SimpleDirectoryReader("/app/maha").load_data()
         self.documents = SimpleDirectoryReader("/home/kiran-vijapure/pipelines/maha").load_data()
 
         self.index = VectorStoreIndex.from_documents(self.documents)
         self.retriever = self.index.as_retriever(similarity_top_k=3)
-        # self.user_prompt = self.get_prompt()
-        # This function is called when the server is started.
-        # pass
-
-        # weaviate_uri: Optional[str] = os.getenv("WEAVIATE_URI", "dummy-uri")
-        # weaviate_auth_apikey: Optional[str] = os.getenv("WEAVIATE_AUTH_APIKEY", "dummy-auth-key"),
-
-        # Intialize llm
-        # self.llm = self.get_llm()
-        # Initialize chat engine. either this or directory call llm
-        # Get weaviate vectorstore client       - Postponed
 
 
     async def on_shutdown(self):
         # This function is called when the server is stopped.
         pass
+
+    def get_nodes(self, user_message):
+        if not user_message.startswith("### Task"):
+            self.nodes = self.retriever.retrieve(user_message)
 
     def pipe(
         self, user_message: str, model_id: str, messages: List[dict], body: dict
@@ -145,31 +143,19 @@ class Pipeline:
         # print(messages)
         # print(user_message)
 
-        self.llm = self.get_llm()
-        print(f"Got llm: {self.llm}")
+        self.get_chat_engine()
+        self.get_prompt()
 
-        self.user_prompt = self.get_prompt()
-        print(f"Got user prompt: \n{self.user_prompt}")
-        print("**"*10)
-
-        nodes = self.retriever.retrieve(user_message)
-        print(f"Got nodes : {len(nodes)}")
-        print("**"*10)
-        prompt = self.set_prompt(nodes, user_message)
-        print(f"Got prompt: {prompt}")
-        print("**"*10)
+        self.get_nodes(user_message)
+        prompt = self.set_prompt(user_message)
 
         # query_engine = self.index.as_query_engine(streaming=True)
         # response = query_engine.query(user_message)
 
-        response = self.llm.stream_complet(prompt)
+        response = self.chat_engine.stream_chat(prompt)
         print(response)
         print("**"*10)
 
         return response.response_gen
 
 
-        # Get documents
-        # Create prompt
-        # Query to llm 
-        # return response.
