@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from typing import Optional, Any, Dict
 from llama_index.llms.openai_like import OpenAILike
 from typing import List, Union, Generator, Iterator
+from weaviate.config import AdditionalConfig, Timeout
 from llama_index.core.chat_engine import SimpleChatEngine
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.weaviate import WeaviateVectorStore
