@@ -53,8 +53,8 @@ class CustomTextEmbeddingsInference(TextEmbeddingsInference):
                 default_headers=default_headers,
             )
         except Exception as e:
-            logging.error(f"Failed to initialize OpenAI client(s): {e}")
-            raise
+            # logging.error(f"Failed to initialize OpenAI client(s): {e}")
+            raise str(e)
 
     def _call_api(self, texts: List[str]) -> List[List[float]]:
         for attempt in range(6):
@@ -68,7 +68,7 @@ class CustomTextEmbeddingsInference(TextEmbeddingsInference):
                     raise Exception(f"Status code: {result.response.status_code}")
                 return [item.embedding for item in result.data]
             except Exception as e:
-                logging.error(f"Embedding request failed: {e}, retrying {attempt+1}/6 after 5 seconds")
+                # logging.error(f"Embedding request failed: {e}, retrying {attempt+1}/6 after 5 seconds")
                 time.sleep(5)
         raise Exception("Failed to get embeddings after 6 attempts")
 
@@ -85,7 +85,7 @@ class CustomTextEmbeddingsInference(TextEmbeddingsInference):
                     raise Exception(f"Status code: {result.response.status_code}")
                 return [item.embedding for item in result.data]
             except Exception as e:
-                logging.error(f"Embedding request failed: {e}, retrying {attempt+1}/6 after 5 seconds")
+                # logging.error(f"Embedding request failed: {e}, retrying {attempt+1}/6 after 5 seconds")
                 await asyncio.sleep(5)
         raise Exception("Failed to get embeddings after 6 attempts")
 
@@ -263,7 +263,7 @@ class Pipeline:
             return client
 
         except Exception as e:
-            logging.error(f"Error in creating Weaviate Client. Error: {str(e)}")
+            # logging.error(f"Error in creating Weaviate Client. Error: {str(e)}")
             if client:
                 client.close()
             raise Exception(f"Error in creating Weaviate Client. Error: {str(e)}")
