@@ -13,12 +13,11 @@ import httpx
 import openai
 import chromadb
 from pydantic import BaseModel
-# from schemas import OpenAIChatMessage
 from typing import Optional, Any, Dict
 from llama_index.llms.openai_like import OpenAILike
 from typing import List, Union, Generator, Iterator
+from llama_index.core.chat_engine import SimpleChatEngine
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
-from llama_index.core.simple import SimpleChatEngine
 
 
 class Pipeline:
