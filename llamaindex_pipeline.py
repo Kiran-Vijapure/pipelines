@@ -13,6 +13,7 @@ import httpx
 import openai
 import weaviate
 from pydantic import BaseModel
+from six.moves.urllib.parse import urljoin
 from typing import Optional, Any, Dict, Tuple
 from llama_index.llms.openai_like import OpenAILike
 from typing import List, Union, Generator, Iterator
@@ -96,6 +97,25 @@ def get_openai_embedding(
     return OpenAIEmbedding(model=embedding_url, api_key=embedding_key)
 
 
+def get_model_id(client):
+    models = client.models.list()
+
+    # Case 1: Check if model_id is directly accessible
+    if hasattr(models, "model_id"):
+        return models.model_id
+
+    # Case 2: Check if it's in the dict format
+    elif hasattr(models, "dict"):
+        model_dict = models.dict()
+        if "data" in model_dict and len(model_dict["data"]) > 0:
+            return model_dict["data"][0]["id"]
+
+    # If neither case works, raise an exception
+    raise ValueError(
+        "Unable to retrieve model ID. API response format may have changed."
+    )
+
+
 def fetch_model_info_from_url(emburl: str, embkey: str) -> Tuple[str, str]:
     model_name = ""
     model_type = ""
@@ -118,12 +138,12 @@ def fetch_model_info_from_url(emburl: str, embkey: str) -> Tuple[str, str]:
             )
             model_name = get_model_id(openai_client)
         model_type = "dkubex"
-        logging.debug(f"Embedding Model ID = {model_name}")
+        # logging.debug(f"Embedding Model ID = {model_name}")
     except Exception as e:
         #logging.error(f"Error fetching model info: {e}")
         headers = {"Authorization": "Bearer " + embkey}
         # Remove "v1/" from the URL
-        new_url = urljoin(end_url.replace("v1/", ""), "info")
+        new_url = urljoin(emburl.replace("v1/", ""), "info")
         response = httpx.request(
             method="GET",
             url=new_url,
@@ -131,9 +151,9 @@ def fetch_model_info_from_url(emburl: str, embkey: str) -> Tuple[str, str]:
             headers=headers,
             verify=False,
         )
-        logging.debug(f"Respone = {response}")
+        # logging.debug(f"Respone = {response}")
         model_name = response.json()["model_id"]
-        logging.debug(f"Embedding Model ID = {model_name}")
+        # logging.debug(f"Embedding Model ID = {model_name}")
         model_type = "sky"
     
     return model_name, model_type
@@ -146,9 +166,9 @@ def get_emb_model_id(emburl: str, embkey: str, return_type: bool = False) -> str
     assert emburl, f"Could not find embedding url. Invalid config for embedding in yaml"
     assert embkey, f"Could not find embedding key Invalid config for embedding in yaml"
     
-    logging.debug(f"Embedding Model-URL = {emburl}")
+    # logging.debug(f"Embedding Model-URL = {emburl}")
    
-    if not end_url.startswith("http"):
+    if not emburl.startswith("http"):
         try:
             model_name = get_openai_embedding(emburl, embkey).model_name
             model_type = "openai"
