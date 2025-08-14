@@ -9,6 +9,7 @@ requirements: llama-index
 """
 
 import os
+import uuid
 import httpx
 import openai
 import weaviate
@@ -168,54 +169,25 @@ def get_emb_model_id(emburl: str, embkey: str, return_type: bool = False) -> str
     
     # logging.debug(f"Embedding Model-URL = {emburl}")
    
-    if not emburl.startswith("http"):
-        try:
-            model_name = get_openai_embedding(emburl, embkey).model_name
-            model_type = "openai"
-        except:
-            model_name = emburl
-            model_type = "huggingface"
-    else:
-        try:
-            model_name, model_type = fetch_model_info_from_url(emburl, embkey)
-        except Exception as e:
-            assert False, f"Provide correct end-point url of the deployed embedding model. {e}"
+    # if not emburl.startswith("http"):
+    #     try:
+    #         model_name = get_openai_embedding(emburl, embkey).model_name
+    #         model_type = "openai"
+    #     except:
+    #         model_name = emburl
+    #         model_type = "huggingface"
+    # else:
+    
+    try:
+        model_name, model_type = fetch_model_info_from_url(emburl, embkey)
+    except Exception as e:
+        assert False, f"Provide correct end-point url of the deployed embedding model. {e}"
 
     if return_type:
         return model_name, model_type
     
     return model_name
 
-
-def get_embed_model(emburl: str, embkey: str) -> CustomTextEmbeddingsInference:
-    if not emburl.startswith("http"):
-        try:
-            return get_openai_embedding(emburl, embkey)
-        except:
-            try:
-                return HuggingFaceEmbedding(model_name=emburl)
-            except Exception as e:
-                error_msg = f"Error while fetching embedding model. {e}"
-                raise Exception(error_msg)
-
-    emb_model, model_type = get_emb_model_id(emburl, embkey, return_type=True)
-    headers = {}
-    try:
-        emb_inference = CustomTextEmbeddingsInference(
-            model_name=emb_model,
-            base_url=emburl,
-            text_instruction=" ",
-            query_instruction=" ",
-            truncate_text=False,
-            batch_size=10,
-            api_key=embkey,
-            default_headers=headers
-        )
-    except Exception as e:
-        error_msg = f"Error while fetching embedding model. {e}"
-        raise Exception(error_msg)
-
-    return emb_inference
 
 
 
@@ -225,7 +197,9 @@ class Pipeline:
         llm_api_key: Optional[str] = "dummy"
         emb_end_point: Optional[str] = "dummy"
         emb_api_key: Optional[str] = "dummy"
-        # openai_apikey: Optional[str] = "dummy-openai-key"
+        enable_securellm: bool = False
+        securellm_url: Optional[str] = "dummy"
+        securellm_appkey: Optional[str] = "dummy"
         user_prompt: Optional[str] = "either-path-or-string"
         dataset: str = "dummy"
         textkey: str = "paperdocs"
@@ -244,20 +218,17 @@ class Pipeline:
             **{
                 "llm_end_point": os.getenv("LLM_END_POINT", "dummy-llm-end-point"),
                 "llm_api_key": os.getenv("LLM_API_KEY", "dummy-llm-api-key"),
-                # "openai_apikey": os.getenv("APIKEY", "dummy-openai-key"),
                 "user_prompt": os.getenv("USER_PROMPT", "either-path-or-string"),
             }
         )
 
         self.flag = 0
 
-    def get_model_name(self,):
-        headers = {"Authorization": self.valves.llm_api_key}
-
+    def get_model_name(self, llmbase: str, llmkey: str, headers: Dict[str, Any]):
         with httpx.Client(verify=False) as _htx_cli:
             client = openai.OpenAI(
-                base_url=self.valves.llm_end_point,
-                api_key=self.valves.llm_api_key,
+                base_url=llmbase,
+                api_key=llmkey,
                 default_headers=headers,
                 http_client=_htx_cli,
             )
@@ -278,10 +249,37 @@ class Pipeline:
             raise ValueError(
                 "Unable to retrieve model ID. API response format may have changed."
             )
+    
+    def get_llm_data(self,) -> Tuple[str, str, Dict[str, Any]]:
+        llmbase = ""
+        llmkey = ""
+        headers = {}
+
+        if self.valves.enable_securellm:
+            llmbase = str(self.valves.securellm_url) + "/api/securellm/v1"
+            llmkey = "Bearer " + str(self.valves.securellm_appkey)
+            
+            headers.update(
+                {
+                    "x-request-id": str(uuid.uuid4()),
+                    "x-sgpt-flow-id": str(uuid.uuid4()),
+                    "x-sllm-tags": {},
+                    "X-Auth-Request-Email": os.getenv("USER", "anonymous"),
+                    "llm-provider": self.valves.llm_end_point,
+                    "Authorization": llmkey,
+                }
+            )
+
+        else:
+            headers = {"Authorization": self.valves.llm_api_key}
+            llmbase = self.valves.llm_end_point
+            llmkey = self.valves.llm_api_key
+
+        return llmbase, llmkey, headers
+
 
     def get_chat_engine(self, ):
-        llmbase = self.valves.llm_end_point
-        headers = {"Authorization": self.valves.llm_api_key}
+        llmbase, llmkey, headers = self.get_llm_data()
 
         _htx_cli = httpx.Client(verify=False) if llmbase.startswith("https") else None
         _htx_acli = (
@@ -289,9 +287,9 @@ class Pipeline:
         )
 
         llm = OpenAILike(
-            model=self.get_model_name(),
+            model=self.get_model_name(llmbase, llmkey, headers),
             api_base=llmbase,
-            api_key=self.valves.llm_api_key,
+            api_key=llmkey,
             temperature=0,
             is_chat_model=True,
             # max_tokens=max_tokens,
@@ -376,31 +374,70 @@ class Pipeline:
             raise Exception(f"Error in creating Weaviate Client. Error: {str(e)}")
 
     async def on_startup(self):
-
-        # Set the OpenAI API key
-        # os.environ["OPENAI_API_KEY"] = os.getenv("APIKEY")
-        # os.environ["OPENAI_API_KEY"] = self.valves.openai_apikey
-        # weaviate_uri: Optional[str] = os.getenv("WEAVIATE_URI", "dummy-uri")
-        # weaviate_auth_apikey: Optional[str] = os.getenv("WEAVIATE_AUTH_APIKEY", "dummy-auth-key"),
-
-        # os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_APIKEY")
-        # self.documents = SimpleDirectoryReader("/home/kiran-vijapure/pipelines/maha").load_data()
-
-        # self.index = VectorStoreIndex.from_documents(self.documents)
-        # self.retriever = self.index.as_retriever(similarity_top_k=3)
-
-        # Get weaviate vector store index.
         self.weaviate_client = self.get_weaviate_client()
-        # vector_store = WeaviateVectorStore(weaviate_client=weaviate_client, index_name=class_name, text_key=textkey)
-
 
     async def on_shutdown(self):
         # This function is called when the server is stopped.
         pass
+    
+    def get_embed_model(
+            self, emburl: str, embkey: str, headers: Dict[str, Any]
+        ) -> CustomTextEmbeddingsInference:
+        if not self.valves.emb_end_point.startswith("http"):
+            try:
+                return get_openai_embedding(self.valves.emb_end_point, self.valves.emb_api_key)
+            except:
+                try:
+                    return HuggingFaceEmbedding(model_name=self.valves.emb_end_point)
+                except Exception as e:
+                    error_msg = f"Error while fetching embedding model. {e}"
+                    raise Exception(error_msg)
 
+        emb_model, model_type = get_emb_model_id(emburl, embkey, return_type=True)
+        headers = {}
+        try:
+            emb_inference = CustomTextEmbeddingsInference(
+                model_name=emb_model,
+                base_url=emburl,
+                text_instruction=" ",
+                query_instruction=" ",
+                truncate_text=False,
+                batch_size=10,
+                api_key=embkey,
+                default_headers=headers
+            )
+        except Exception as e:
+            error_msg = f"Error while fetching embedding model. {e}"
+            raise Exception(error_msg)
+
+        return emb_inference
+    
+    def get_emb_data(self,) -> Tuple[str, str, Dict[str, Any]]:
+        emburl = ""
+        embkey = ""
+        headers = {}
+        
+        if self.valves.enable_securellm:
+            emburl = str(plcfg["securellm"]["dkubex_url"]) + "/api/securellm"
+            embkey = "Bearer " + str(plcfg["securellm"]["appkey"])
+            
+            headers.update(
+                {
+                    "llm-provider": self.valves.emb_end_point,
+                    "Authorization": embkey,
+                    "sllm-stream-response": "false",
+                }
+            )
+
+        else:
+            emburl = self.valves.emb_end_point
+            embkey = self.valves.emb_api_key
+
+        return emburl, embkey, headers
 
     def get_weaviate_retriever(self):
         if not self.embed_model:
+            emburl, embkey, headers = self.get_emb_data()
             self.embed_model = get_embed_model(self.valves.emb_end_point, self.valves.emb_api_key)
 
         if not self.retriever:
@@ -416,32 +453,17 @@ class Pipeline:
                         )
             self.retriever = vector_index.as_retriever(similarity_top_k=self.valves.top_k)
 
-
     def get_nodes(self, user_message):
         if not user_message.startswith("### Task"):
             self.nodes = self.retriever.retrieve(user_message)
-            
-            # print("**"*10)
-            # print("**"*10)
-            # for no, node in enumerate(self.nodes):
-            #     print(no)
-            #     print(node)
-            #     print("--"*10)
-            #     print("--"*10)
-            #     print(node.text)
-            #     print("**"*10)
-            #     print("**"*10)
-
 
     def rewrite_query(self, user_message: str):
         if not user_message.startswith("### Task"):
             rewritten_prompt = self.get_rewritten_prompt()
             response = self.chat_engine.chat(prompt)
 
-
     def get_chat_history(self):
         pass
-
 
     def pipe(
         self, user_message: str, model_id: str, messages: List[dict], body: dict
@@ -449,14 +471,7 @@ class Pipeline:
         # This is where you can add your custom RAG pipeline.
         # Typically, you would retrieve relevant information from your knowledge base and synthesize it to generate a response.
 
-        # print("**"*10)
-        # print("**"*10)
-        # print(self.flag)
-        print(messages)
-        print(self.valves.dataset)
-        print("**"*10)
-        print("**"*10)
-        # self.flag += 1
+        # print(messages)
         # print(user_message)
 
         self.get_weaviate_retriever()
@@ -465,15 +480,6 @@ class Pipeline:
 
         self.get_nodes(user_message)
         prompt = self.set_prompt(user_message)
-        print("**"*10)
-        print("**"*10)
-        print(f"Prompt:\n\n{prompt}")
-        print("**"*10)
-        print("**"*10)
-
-
-        # query_engine = self.index.as_query_engine(streaming=True)
-        # response = query_engine.query(user_message)
 
         response = self.chat_engine.stream_chat(prompt)
 
