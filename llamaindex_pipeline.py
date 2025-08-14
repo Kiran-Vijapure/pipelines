@@ -139,7 +139,7 @@ def fetch_model_info_from_url(emburl: str, embkey: str) -> Tuple[str, str]:
     return model_name, model_type
 
 
-def get_emb_model_id(emburl: str, embkey: str) -> str | Tuple[str, str]:
+def get_emb_model_id(emburl: str, embkey: str, return_type: bool = False) -> str | Tuple[str, str]:
     model_name = ""
     model_type = ""
     
@@ -170,7 +170,7 @@ def get_emb_model_id(emburl: str, embkey: str) -> str | Tuple[str, str]:
 def get_embed_model(emburl: str, embkey: str) -> CustomTextEmbeddingsInference:
     if not emburl.startswith("http"):
         try:
-            return get_openai_embedding(emburl, embkey, plcfg)
+            return get_openai_embedding(emburl, embkey)
         except:
             try:
                 return HuggingFaceEmbedding(model_name=emburl)
@@ -178,7 +178,7 @@ def get_embed_model(emburl: str, embkey: str) -> CustomTextEmbeddingsInference:
                 error_msg = f"Error while fetching embedding model. {e}"
                 raise Exception(error_msg)
 
-    emb_model, model_type = get_emb_model_id(plcfg, return_type=True)
+    emb_model, model_type = get_emb_model_id(emburl, embkey, return_type=True)
     headers = {}
     try:
         emb_inference = CustomTextEmbeddingsInference(
