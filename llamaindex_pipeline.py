@@ -221,8 +221,22 @@ class Pipeline:
             self.user_prompt = self.valves.user_prompt
 
     def set_prompt(self,query: str) -> str:
-        text_list = [ node.text for node in self.nodes ]
-        context = "\n".join(text_list)
+        text_data_list = [ 
+                ( node.metadata.get("file_name", ""), node.metadata.get("file_path", ""), node.text )
+                for node in self.nodes 
+            ]
+
+        context = ""
+        for text_data in text_data_list:
+            if text_data[0]:
+                context += text_data[0]
+
+            if text_data[1]:
+                context += f" ({text_data[1]}): "
+
+            if text_data[2]:
+                context += f"{text_data[2]}\n"
+
         prompt = self.user_prompt.format(context=context, question=query)
         return prompt
        
@@ -344,14 +358,14 @@ class Pipeline:
         # This is where you can add your custom RAG pipeline.
         # Typically, you would retrieve relevant information from your knowledge base and synthesize it to generate a response.
 
-        print("**"*10)
-        print("**"*10)
-        print(self.flag)
+        # print("**"*10)
+        # print("**"*10)
+        # print(self.flag)
         print(messages)
         print(self.valves.dataset)
         print("**"*10)
         print("**"*10)
-        self.flag += 1
+        # self.flag += 1
         # print(user_message)
 
         self.get_weaviate_retriever()
