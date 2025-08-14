@@ -11,10 +11,9 @@ requirements: llama-index
 import os
 import httpx
 import openai
-import chromadb
 import weaviate
 from pydantic import BaseModel
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Tuple
 from llama_index.llms.openai_like import OpenAILike
 from typing import List, Union, Generator, Iterator
 from weaviate.config import AdditionalConfig, Timeout
@@ -92,9 +91,80 @@ class CustomTextEmbeddingsInference(TextEmbeddingsInference):
 
 
 def get_openai_embedding(
-    embedding_url: str, embedding_key: str, plcfg: Dict[str, Any]= {}
+    embedding_url: str, embedding_key: str,
 ) -> OpenAIEmbedding:
     return OpenAIEmbedding(model=embedding_url, api_key=embedding_key)
+
+
+def fetch_model_info_from_url(emburl: str, embkey: str) -> Tuple[str, str]:
+    model_name = ""
+    model_type = ""
+    
+    headers = {}
+    base_url = emburl
+    
+    # Remove "Bearer " prefix if present in emb_key
+    if embkey.lower().startswith("bearer "):
+        embkey = embkey.strip()[7:].strip()
+
+    try:
+        #print(f"fetch_model_info_from_url: base_url={base_url}, emb_key={emb_key}")
+        with httpx.Client(verify=False) as httpx_client:
+            openai_client = openai.OpenAI(
+                base_url=base_url,
+                api_key=embkey,
+                default_headers=headers,
+                http_client=httpx_client,
+            )
+            model_name = get_model_id(openai_client)
+        model_type = "dkubex"
+        logging.debug(f"Embedding Model ID = {model_name}")
+    except Exception as e:
+        #logging.error(f"Error fetching model info: {e}")
+        headers = {"Authorization": "Bearer " + embkey}
+        # Remove "v1/" from the URL
+        new_url = urljoin(end_url.replace("v1/", ""), "info")
+        response = httpx.request(
+            method="GET",
+            url=new_url,
+            follow_redirects=True,
+            headers=headers,
+            verify=False,
+        )
+        logging.debug(f"Respone = {response}")
+        model_name = response.json()["model_id"]
+        logging.debug(f"Embedding Model ID = {model_name}")
+        model_type = "sky"
+    
+    return model_name, model_type
+
+
+def get_emb_model_id(emburl: str, embkey: str) -> str | Tuple[str, str]:
+    model_name = ""
+    model_type = ""
+    
+    assert emburl, f"Could not find embedding url. Invalid config for embedding in yaml"
+    assert embkey, f"Could not find embedding key Invalid config for embedding in yaml"
+    
+    logging.debug(f"Embedding Model-URL = {emburl}")
+   
+    if not end_url.startswith("http"):
+        try:
+            model_name = get_openai_embedding(emburl, embkey).model_name
+            model_type = "openai"
+        except:
+            model_name = emburl
+            model_type = "huggingface"
+    else:
+        try:
+            model_name, model_type = fetch_model_info_from_url(emburl, embkey)
+        except Exception as e:
+            assert False, f"Provide correct end-point url of the deployed embedding model. {e}"
+
+    if return_type:
+        return model_name, model_type
+    
+    return model_name
 
 
 def get_embed_model(emburl: str, embkey: str) -> CustomTextEmbeddingsInference:
@@ -108,6 +178,7 @@ def get_embed_model(emburl: str, embkey: str) -> CustomTextEmbeddingsInference:
                 error_msg = f"Error while fetching embedding model. {e}"
                 raise Exception(error_msg)
 
+    emb_model, model_type = get_emb_model_id(plcfg, return_type=True)
     headers = {}
     try:
         emb_inference = CustomTextEmbeddingsInference(
