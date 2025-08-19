@@ -10,6 +10,7 @@ requirements: llama-index
 
 import os
 import uuid
+import json
 import httpx
 import openai
 import weaviate
@@ -256,14 +257,14 @@ class Pipeline:
         headers = {}
 
         if self.valves.enable_securellm:
-            llmbase = str(self.valves.securellm_url) + "/api/securellm/v1"
+            # llmbase = str(self.valves.securellm_url) + "/api/securellm/v1"
+            llmbase = str(self.valves.securellm_url) + "/api/securellm"
             llmkey = "Bearer " + str(self.valves.securellm_appkey)
             
             headers.update(
                 {
                     "x-request-id": str(uuid.uuid4()),
                     "x-sgpt-flow-id": str(uuid.uuid4()),
-                    "x-sllm-tags": {},
                     "X-Auth-Request-Email": os.getenv("USER", "anonymous"),
                     "llm-provider": self.valves.llm_end_point,
                     "Authorization": llmkey,
@@ -286,8 +287,18 @@ class Pipeline:
             httpx.AsyncClient(verify=False) if llmbase.startswith("https") else None
         )
 
+        tags = {
+            "dataset": self.valves.dataset,
+            "embedding_model": self.embed_model.model_name,
+        }
+        
+        llm_model = self.get_model_name(llmbase, llmkey, headers)
+        headers.update({"x-llm-tags": json.dumps(tags)})
+
+        print(f"Headers : {headers}")
+        print('**'*10)
         llm = OpenAILike(
-            model=self.get_model_name(llmbase, llmkey, headers),
+            model=llm_model,
             api_base=llmbase,
             api_key=llmkey,
             temperature=0,
@@ -381,7 +392,8 @@ class Pipeline:
         pass
     
     def get_embed_model(
-            self, emburl: str, embkey: str, headers: Dict[str, Any]
+            # self, emburl: str, embkey: str, headers: Dict[str, Any]
+            self, emburl: str, embkey: str
         ) -> CustomTextEmbeddingsInference:
         if not self.valves.emb_end_point.startswith("http"):
             try:
@@ -437,8 +449,8 @@ class Pipeline:
 
     def get_weaviate_retriever(self):
         if not self.embed_model:
-            emburl, embkey, headers = self.get_emb_data()
-            self.embed_model = get_embed_model(self.valves.emb_end_point, self.valves.emb_api_key)
+            # emburl, embkey, headers = self.get_emb_data()
+            self.embed_model = self.get_embed_model(self.valves.emb_end_point, self.valves.emb_api_key)
 
         if not self.retriever:
             vector_store = WeaviateVectorStore(
