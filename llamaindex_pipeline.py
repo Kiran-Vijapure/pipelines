@@ -5,16 +5,20 @@ date: 2024-05-30
 version: 1.0
 license: MIT
 description: A pipeline for retrieving relevant information from a knowledge base using the Llama Index library.
-requirements: llama-index
 """
+
+# requirements: llama-index
 
 import os
 import uuid
 import json
 import httpx
 import openai
+import mlflow
 import weaviate
+import requests
 from pydantic import BaseModel
+from mlflow import MlflowClient
 from six.moves.urllib.parse import urljoin
 from typing import Optional, Any, Dict, Tuple
 from llama_index.llms.openai_like import OpenAILike
@@ -27,6 +31,8 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
 from llama_index.embeddings.text_embeddings_inference import TextEmbeddingsInference
 
+
+REFERENCES_STR = ""
 
 class CustomTextEmbeddingsInference(TextEmbeddingsInference):
     client: openai.OpenAI | None = None
@@ -190,6 +196,92 @@ def get_emb_model_id(emburl: str, embkey: str, return_type: bool = False) -> str
     return model_name
 
 
+###########################################################################
+###########################################################################
+
+def dict_log(
+    client: MlflowClient, run_id: str, data: Dict[str, Any], file_name: str
+):
+    client.log_dict(
+            run_id=run_id, 
+            dictionary=data,
+            artifact_file=file_name,
+        )
+
+
+def add_exp_permission(experiment_id):
+    payload = {
+        "permission": "EDIT",
+        "id": experiment_id,
+        "all_users": True,
+        "publish": True,
+    }
+    
+    # dkubex_url = os.getenv("DKUBEX_ADDERESS", "")
+    dkubex_url = os.getenv("DKUBEX_URL", os.getenv("DKUBEX_ADDERESS", "http://ingress-nginx-controller.d3x.svc.cluster.local:80"))
+    api_prefix = 'd3x'
+    headers = {"authorization": f"Bearer {os.getenv('APIKEY', os.getenv('DKUBEX_APIKEY', ''))}"}
+    resp = requests.post(
+            # f"{obj.url}/api/{obj.api_prefix}/mlflow/experiments/permission",
+        f"{dkubex_url}/api/{api_prefix}/mlflow/experiments/permission",
+        # headers=obj.headers,
+        headers=headers,
+        json=payload,
+        verify=False,
+    )
+    resp.raise_for_status()
+
+
+def get_run_id(client: MlflowClient, exp_id: str, run_name: str, tags):
+    # Search dataset run if not then create run and return run id.
+    run_id = ""
+
+    run_list = client.search_runs(
+            experiment_ids=[exp_id], filter_string=f"run_name='{run_name}'"
+        ).to_list()
+
+    if not run_list:
+        # Create dataset run and get run id
+        run_id = client.create_run(
+                experiment_id=exp_id, 
+                run_name=run_name,
+                tags=tags,
+            ).info.run_id
+        # run_id = run.info.run_id
+    else:
+        # Get dataset run id
+        run_id = run_list[0].info.run_id
+
+    return run_id
+
+
+def get_question_run_id(client: MlflowClient, experiment_name: str, dataset_run_name: str):
+    exp = client.get_experiment_by_name(name=experiment_name)
+
+    if not exp:
+        exp_id = client.create_experiment(name=experiment_name)
+        add_exp_permission(exp_id)
+    else:
+        exp_id = exp.experiment_id
+   
+    # Get dataset run id.
+    dataset_run_id = get_run_id(client, exp_id, dataset_run_name, tags={})
+   
+    # Get conversation run id.
+    conv_run_id = get_run_id(
+            client, exp_id, "conv-default", tags={"mlflow.parentRunId": dataset_run_id}
+        )
+
+    # Get question run id
+    question_run_id = get_run_id(
+            client, exp_id, f"question-{str(uuid.uuid4())}", tags={"mlflow.parentRunId": conv_run_id}
+        )
+
+    return question_run_id
+
+
+###########################################################################
+###########################################################################
 
 
 class Pipeline:
@@ -198,6 +290,7 @@ class Pipeline:
         llm_api_key: Optional[str] = "dummy"
         emb_end_point: Optional[str] = "dummy"
         emb_api_key: Optional[str] = "dummy"
+        mlflow_experiment_name: str = "default_a"
         enable_securellm: bool = False
         securellm_url: Optional[str] = "dummy"
         securellm_appkey: Optional[str] = "dummy"
@@ -214,8 +307,9 @@ class Pipeline:
         self.user_prompt: str = None
         self.nodes: List[Any] = None
         self.documents: List[Any] = None
+        self.reference_str: str = ""
         self.chat_engine: SimpleChatEngine = None
-        self.valves: Dict[str, Any] = self.Valves(
+        self.valves = self.Valves(
             **{
                 "llm_end_point": os.getenv("LLM_END_POINT", "dummy-llm-end-point"),
                 "llm_api_key": os.getenv("LLM_API_KEY", "dummy-llm-api-key"),
@@ -293,10 +387,8 @@ class Pipeline:
         }
         
         llm_model = self.get_model_name(llmbase, llmkey, headers)
-        headers.update({"x-llm-tags": json.dumps(tags)})
+        headers.update({"x-sllm-tags": json.dumps(tags)})
 
-        print(f"Headers : {headers}")
-        print('**'*10)
         llm = OpenAILike(
             model=llm_model,
             api_base=llmbase,
@@ -386,6 +478,7 @@ class Pipeline:
 
     async def on_startup(self):
         self.weaviate_client = self.get_weaviate_client()
+        self.mlflow_client = MlflowClient(tracking_uri=os.getenv("MLFLOW_TRACKING_URI"))
 
     async def on_shutdown(self):
         # This function is called when the server is stopped.
@@ -465,9 +558,26 @@ class Pipeline:
                         )
             self.retriever = vector_index.as_retriever(similarity_top_k=self.valves.top_k)
 
-    def get_nodes(self, user_message):
+    def get_nodes(self, user_message: str):
         if not user_message.startswith("### Task"):
             self.nodes = self.retriever.retrieve(user_message)
+
+    def get_references(self, user_message: str):
+        if user_message.startswith("### Task"):
+            return "", []
+
+        ref_str = "\n\n**References:**\n\n"
+        ref_list = []
+
+        for no, node in enumerate(self.nodes):
+            ref_str += f"{no + 1} [{node.metadata['file_name']} Page {node.metadata['page_no']}]({node.metadata['file_path']})\n\n"
+            ref_list.append({
+                    "document": node.metadata['file_name'],
+                    "page": node.metadata["page_no"],
+                    "link": node.metadata["file_path"]
+                })
+
+        return ref_str, ref_list
 
     def rewrite_query(self, user_message: str):
         if not user_message.startswith("### Task"):
@@ -477,23 +587,68 @@ class Pipeline:
     def get_chat_history(self):
         pass
 
+
+    def mlflow_logging(self, answer: str):
+        ques_run_id = get_question_run_id(
+                self.mlflow_client, 
+                self.valves.mlflow_experiment_name,
+                self.valves.dataset + "-ragquery"
+            )
+
+        # Log nodes
+        reference_nodes = []
+        for node in self.nodes:
+            reference_nodes.append({"text": node.text, "metadata": node.metadata})
+
+        dict_log(
+            self.mlflow_client, ques_run_id, {"reference_nodes": reference_nodes}, "reference_nodes.json"
+        )
+
+        # Need to add mlflow dataset.
+        
+        # Log questions
+        dict_log(
+            self.mlflow_client, ques_run_id, {"question": self.question,}, "question.json",
+        )
+
+        # Log response
+        dict_log(
+            self.mlflow_client, ques_run_id, {"response": answer}, "answer.json"
+        )
+
+        # Log references
+        dict_log(
+            self.mlflow_client, ques_run_id, {"response_references": self.reference_list,}, "answer_references.json",
+        )
+        
+        # Log valves / config
+        dict_log(
+            self.mlflow_client, ques_run_id, self.valves.__dict__, "rag_config.json"
+        )
+
+
     def pipe(
         self, user_message: str, model_id: str, messages: List[dict], body: dict
     ) -> Union[str, Generator, Iterator]:
+        global REFERENCES_STR
         # This is where you can add your custom RAG pipeline.
         # Typically, you would retrieve relevant information from your knowledge base and synthesize it to generate a response.
 
         # print(messages)
         # print(user_message)
 
+        self.question = user_message
         self.get_weaviate_retriever()
-        self.get_chat_engine()
         self.get_prompt()
 
         self.get_nodes(user_message)
         prompt = self.set_prompt(user_message)
+        self.reference_str, self.reference_list = self.get_references(user_message)
+        self.get_chat_engine()
 
         response = self.chat_engine.stream_chat(prompt)
+        print(prompt)
+        print("**"*10)
 
         return response.response_gen
 
