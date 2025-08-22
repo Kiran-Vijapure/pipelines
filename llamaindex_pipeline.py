@@ -17,6 +17,7 @@ import openai
 import mlflow
 import weaviate
 import requests
+from threading import Thread
 from pydantic import BaseModel
 from mlflow import MlflowClient
 from six.moves.urllib.parse import urljoin
@@ -34,12 +35,15 @@ from llama_index.embeddings.text_embeddings_inference import TextEmbeddingsInfer
 
 REFERENCES_STR = ""
 
+
 class CustomTextEmbeddingsInference(TextEmbeddingsInference):
     client: openai.OpenAI | None = None
     async_client: openai.AsyncOpenAI | None = None
     batch_size: int = 32
 
-    def __init__(self, batch_size: int, api_key: str, default_headers: Dict[str, str], **kwargs):
+    def __init__(
+        self, batch_size: int, api_key: str, default_headers: Dict[str, str], **kwargs
+    ):
         super().__init__(**kwargs)
 
         self.auth_token = api_key.strip()
@@ -47,7 +51,7 @@ class CustomTextEmbeddingsInference(TextEmbeddingsInference):
             self.auth_token = self.auth_token[7:].strip()
         self.batch_size = batch_size
         self.timeout = 300
-        #print(f"Initializing CustomTextEmbeddingsInference with base_url: {self.base_url}, auth_token: {self.auth_token}", flush=True)  
+        # print(f"Initializing CustomTextEmbeddingsInference with base_url: {self.base_url}, auth_token: {self.auth_token}", flush=True)
         try:
             self.client = openai.OpenAI(
                 base_url=self.base_url,
@@ -73,7 +77,10 @@ class CustomTextEmbeddingsInference(TextEmbeddingsInference):
                     extra_body={"input_type": "query"},
                     input=texts,
                 )
-                if hasattr(result, "response") and getattr(result.response, "status_code", 200) != 200:
+                if (
+                    hasattr(result, "response")
+                    and getattr(result.response, "status_code", 200) != 200
+                ):
                     raise Exception(f"Status code: {result.response.status_code}")
                 return [item.embedding for item in result.data]
             except Exception as e:
@@ -83,6 +90,7 @@ class CustomTextEmbeddingsInference(TextEmbeddingsInference):
 
     async def _acall_api(self, texts: List[str]) -> List[List[float]]:
         import asyncio
+
         for attempt in range(6):
             try:
                 result = await self.async_client.embeddings.create(
@@ -90,7 +98,10 @@ class CustomTextEmbeddingsInference(TextEmbeddingsInference):
                     extra_body={"input_type": "query"},
                     input=texts,
                 )
-                if hasattr(result, "response") and getattr(result.response, "status_code", 200) != 200:
+                if (
+                    hasattr(result, "response")
+                    and getattr(result.response, "status_code", 200) != 200
+                ):
                     raise Exception(f"Status code: {result.response.status_code}")
                 return [item.embedding for item in result.data]
             except Exception as e:
@@ -100,7 +111,8 @@ class CustomTextEmbeddingsInference(TextEmbeddingsInference):
 
 
 def get_openai_embedding(
-    embedding_url: str, embedding_key: str,
+    embedding_url: str,
+    embedding_key: str,
 ) -> OpenAIEmbedding:
     return OpenAIEmbedding(model=embedding_url, api_key=embedding_key)
 
@@ -127,16 +139,16 @@ def get_model_id(client):
 def fetch_model_info_from_url(emburl: str, embkey: str) -> Tuple[str, str]:
     model_name = ""
     model_type = ""
-    
+
     headers = {}
     base_url = emburl
-    
+
     # Remove "Bearer " prefix if present in emb_key
     if embkey.lower().startswith("bearer "):
         embkey = embkey.strip()[7:].strip()
 
     try:
-        #print(f"fetch_model_info_from_url: base_url={base_url}, emb_key={emb_key}")
+        # print(f"fetch_model_info_from_url: base_url={base_url}, emb_key={emb_key}")
         with httpx.Client(verify=False) as httpx_client:
             openai_client = openai.OpenAI(
                 base_url=base_url,
@@ -148,7 +160,7 @@ def fetch_model_info_from_url(emburl: str, embkey: str) -> Tuple[str, str]:
         model_type = "dkubex"
         # logging.debug(f"Embedding Model ID = {model_name}")
     except Exception as e:
-        #logging.error(f"Error fetching model info: {e}")
+        # logging.error(f"Error fetching model info: {e}")
         headers = {"Authorization": "Bearer " + embkey}
         # Remove "v1/" from the URL
         new_url = urljoin(emburl.replace("v1/", ""), "info")
@@ -163,19 +175,21 @@ def fetch_model_info_from_url(emburl: str, embkey: str) -> Tuple[str, str]:
         model_name = response.json()["model_id"]
         # logging.debug(f"Embedding Model ID = {model_name}")
         model_type = "sky"
-    
+
     return model_name, model_type
 
 
-def get_emb_model_id(emburl: str, embkey: str, return_type: bool = False) -> str | Tuple[str, str]:
+def get_emb_model_id(
+    emburl: str, embkey: str, return_type: bool = False
+) -> str | Tuple[str, str]:
     model_name = ""
     model_type = ""
-    
+
     assert emburl, f"Could not find embedding url. Invalid config for embedding in yaml"
     assert embkey, f"Could not find embedding key Invalid config for embedding in yaml"
-    
+
     # logging.debug(f"Embedding Model-URL = {emburl}")
-   
+
     # if not emburl.startswith("http"):
     #     try:
     #         model_name = get_openai_embedding(emburl, embkey).model_name
@@ -184,29 +198,30 @@ def get_emb_model_id(emburl: str, embkey: str, return_type: bool = False) -> str
     #         model_name = emburl
     #         model_type = "huggingface"
     # else:
-    
+
     try:
         model_name, model_type = fetch_model_info_from_url(emburl, embkey)
     except Exception as e:
-        assert False, f"Provide correct end-point url of the deployed embedding model. {e}"
+        assert (
+            False
+        ), f"Provide correct end-point url of the deployed embedding model. {e}"
 
     if return_type:
         return model_name, model_type
-    
+
     return model_name
 
 
 ###########################################################################
 ###########################################################################
 
-def dict_log(
-    client: MlflowClient, run_id: str, data: Dict[str, Any], file_name: str
-):
+
+def dict_log(client: MlflowClient, run_id: str, data: Dict[str, Any], file_name: str):
     client.log_dict(
-            run_id=run_id, 
-            dictionary=data,
-            artifact_file=file_name,
-        )
+        run_id=run_id,
+        dictionary=data,
+        artifact_file=file_name,
+    )
 
 
 def add_exp_permission(experiment_id):
@@ -216,13 +231,21 @@ def add_exp_permission(experiment_id):
         "all_users": True,
         "publish": True,
     }
-    
+
     # dkubex_url = os.getenv("DKUBEX_ADDERESS", "")
-    dkubex_url = os.getenv("DKUBEX_URL", os.getenv("DKUBEX_ADDERESS", "http://ingress-nginx-controller.d3x.svc.cluster.local:80"))
-    api_prefix = 'd3x'
-    headers = {"authorization": f"Bearer {os.getenv('APIKEY', os.getenv('DKUBEX_APIKEY', ''))}"}
+    dkubex_url = os.getenv(
+        "DKUBEX_URL",
+        os.getenv(
+            "DKUBEX_ADDERESS",
+            "http://ingress-nginx-controller.d3x.svc.cluster.local:80",
+        ),
+    )
+    api_prefix = "d3x"
+    headers = {
+        "authorization": f"Bearer {os.getenv('APIKEY', os.getenv('DKUBEX_APIKEY', ''))}"
+    }
     resp = requests.post(
-            # f"{obj.url}/api/{obj.api_prefix}/mlflow/experiments/permission",
+        # f"{obj.url}/api/{obj.api_prefix}/mlflow/experiments/permission",
         f"{dkubex_url}/api/{api_prefix}/mlflow/experiments/permission",
         # headers=obj.headers,
         headers=headers,
@@ -237,16 +260,16 @@ def get_run_id(client: MlflowClient, exp_id: str, run_name: str, tags):
     run_id = ""
 
     run_list = client.search_runs(
-            experiment_ids=[exp_id], filter_string=f"run_name='{run_name}'"
-        ).to_list()
+        experiment_ids=[exp_id], filter_string=f"run_name='{run_name}'"
+    ).to_list()
 
     if not run_list:
         # Create dataset run and get run id
         run_id = client.create_run(
-                experiment_id=exp_id, 
-                run_name=run_name,
-                tags=tags,
-            ).info.run_id
+            experiment_id=exp_id,
+            run_name=run_name,
+            tags=tags,
+        ).info.run_id
         # run_id = run.info.run_id
     else:
         # Get dataset run id
@@ -255,7 +278,9 @@ def get_run_id(client: MlflowClient, exp_id: str, run_name: str, tags):
     return run_id
 
 
-def get_question_run_id(client: MlflowClient, experiment_name: str, dataset_run_name: str):
+def get_question_run_id(
+    client: MlflowClient, experiment_name: str, dataset_run_name: str
+):
     exp = client.get_experiment_by_name(name=experiment_name)
 
     if not exp:
@@ -263,21 +288,77 @@ def get_question_run_id(client: MlflowClient, experiment_name: str, dataset_run_
         add_exp_permission(exp_id)
     else:
         exp_id = exp.experiment_id
-   
+
     # Get dataset run id.
     dataset_run_id = get_run_id(client, exp_id, dataset_run_name, tags={})
-   
+
     # Get conversation run id.
     conv_run_id = get_run_id(
-            client, exp_id, "conv-default", tags={"mlflow.parentRunId": dataset_run_id}
-        )
+        client, exp_id, "conv-default", tags={"mlflow.parentRunId": dataset_run_id}
+    )
 
     # Get question run id
     question_run_id = get_run_id(
-            client, exp_id, f"question-{str(uuid.uuid4())}", tags={"mlflow.parentRunId": conv_run_id}
-        )
+        client,
+        exp_id,
+        f"question-{str(uuid.uuid4())}",
+        tags={"mlflow.parentRunId": conv_run_id},
+    )
 
     return question_run_id
+
+
+def log_to_mlflow(
+    client: MlflowClient,
+    experiment_name: str,
+    dataset: str,
+    nodes: List,
+    question: str,
+    answer: str,
+    reference_list: List,
+    config,
+):
+    ques_run_id = get_question_run_id(client, experiment_name, dataset + "-ragquery")
+
+    # Log nodes
+    reference_nodes = []
+    for node in nodes:
+        reference_nodes.append({"text": node.text, "metadata": node.metadata})
+
+    dict_log(
+        client,
+        ques_run_id,
+        {"reference_nodes": reference_nodes},
+        "reference_nodes.json",
+    )
+
+    # Need to add mlflow dataset.
+
+    # Log questions
+    dict_log(
+        client,
+        ques_run_id,
+        {
+            "question": question,
+        },
+        "question.json",
+    )
+
+    # Log response
+    dict_log(client, ques_run_id, {"response": answer}, "answer.json")
+
+    # Log references
+    dict_log(
+        client,
+        ques_run_id,
+        {
+            "response_references": reference_list,
+        },
+        "answer_references.json",
+    )
+
+    # Log valves / config
+    dict_log(client, ques_run_id, config, "rag_config.json")
 
 
 ###########################################################################
@@ -298,7 +379,6 @@ class Pipeline:
         dataset: str = "dummy"
         textkey: str = "paperdocs"
         top_k: int = 3
-
 
     def __init__(self):
         self.embed_model: Any = None
@@ -344,8 +424,10 @@ class Pipeline:
             raise ValueError(
                 "Unable to retrieve model ID. API response format may have changed."
             )
-    
-    def get_llm_data(self,) -> Tuple[str, str, Dict[str, Any]]:
+
+    def get_llm_data(
+        self,
+    ) -> Tuple[str, str, Dict[str, Any]]:
         llmbase = ""
         llmkey = ""
         headers = {}
@@ -354,7 +436,7 @@ class Pipeline:
             # llmbase = str(self.valves.securellm_url) + "/api/securellm/v1"
             llmbase = str(self.valves.securellm_url) + "/api/securellm"
             llmkey = "Bearer " + str(self.valves.securellm_appkey)
-            
+
             headers.update(
                 {
                     "x-request-id": str(uuid.uuid4()),
@@ -372,8 +454,9 @@ class Pipeline:
 
         return llmbase, llmkey, headers
 
-
-    def get_chat_engine(self, ):
+    def get_chat_engine(
+        self,
+    ):
         llmbase, llmkey, headers = self.get_llm_data()
 
         _htx_cli = httpx.Client(verify=False) if llmbase.startswith("https") else None
@@ -385,7 +468,7 @@ class Pipeline:
             "dataset": self.valves.dataset,
             "embedding_model": self.embed_model.model_name,
         }
-        
+
         llm_model = self.get_model_name(llmbase, llmkey, headers)
         headers.update({"x-sllm-tags": json.dumps(tags)})
 
@@ -404,7 +487,6 @@ class Pipeline:
 
         self.chat_engine = SimpleChatEngine.from_defaults(llm=llm)
 
-
     def get_prompt(self):
         try:
             with open(self.valves.user_prompt, "r") as f:
@@ -412,11 +494,15 @@ class Pipeline:
         except:
             self.user_prompt = self.valves.user_prompt
 
-    def set_prompt(self,query: str) -> str:
-        text_data_list = [ 
-                ( node.metadata.get("file_name", ""), node.metadata.get("file_path", ""), node.text )
-                for node in self.nodes 
-            ]
+    def set_prompt(self, query: str) -> str:
+        text_data_list = [
+            (
+                node.metadata.get("file_name", ""),
+                node.metadata.get("file_path", ""),
+                node.text,
+            )
+            for node in self.nodes
+        ]
 
         context = ""
         for text_data in text_data_list:
@@ -431,11 +517,13 @@ class Pipeline:
 
         prompt = self.user_prompt.format(context=context, question=query)
         return prompt
-       
+
     def get_weaviate_client(self):
         client = None
         try:
-            http_host = os.getenv("WEAVIATE_SERVICE_HOST", "weaviate.d3x.svc.cluster.local")
+            http_host = os.getenv(
+                "WEAVIATE_SERVICE_HOST", "weaviate.d3x.svc.cluster.local"
+            )
 
             http_grpc_host = os.getenv(
                 "WEAVIATE_SERVICE_HOST_GRPC", "weaviate-grpc.d3x.svc.cluster.local"
@@ -461,7 +549,9 @@ class Pipeline:
                 grpc_secure=False if int(grpc_port) != 443 else True,
                 headers=additional_headers,
                 additional_config=AdditionalConfig(
-                    timeout=Timeout(init=120, query=300, insert=300)  # Values in seconds
+                    timeout=Timeout(
+                        init=120, query=300, insert=300
+                    )  # Values in seconds
                 ),
             )
 
@@ -483,14 +573,18 @@ class Pipeline:
     async def on_shutdown(self):
         # This function is called when the server is stopped.
         pass
-    
+
     def get_embed_model(
-            # self, emburl: str, embkey: str, headers: Dict[str, Any]
-            self, emburl: str, embkey: str
-        ) -> CustomTextEmbeddingsInference:
+        # self, emburl: str, embkey: str, headers: Dict[str, Any]
+        self,
+        emburl: str,
+        embkey: str,
+    ) -> CustomTextEmbeddingsInference:
         if not self.valves.emb_end_point.startswith("http"):
             try:
-                return get_openai_embedding(self.valves.emb_end_point, self.valves.emb_api_key)
+                return get_openai_embedding(
+                    self.valves.emb_end_point, self.valves.emb_api_key
+                )
             except:
                 try:
                     return HuggingFaceEmbedding(model_name=self.valves.emb_end_point)
@@ -509,23 +603,25 @@ class Pipeline:
                 truncate_text=False,
                 batch_size=10,
                 api_key=embkey,
-                default_headers=headers
+                default_headers=headers,
             )
         except Exception as e:
             error_msg = f"Error while fetching embedding model. {e}"
             raise Exception(error_msg)
 
         return emb_inference
-    
-    def get_emb_data(self,) -> Tuple[str, str, Dict[str, Any]]:
+
+    def get_emb_data(
+        self,
+    ) -> Tuple[str, str, Dict[str, Any]]:
         emburl = ""
         embkey = ""
         headers = {}
-        
+
         if self.valves.enable_securellm:
             emburl = str(plcfg["securellm"]["dkubex_url"]) + "/api/securellm"
             embkey = "Bearer " + str(plcfg["securellm"]["appkey"])
-            
+
             headers.update(
                 {
                     "llm-provider": self.valves.emb_end_point,
@@ -543,20 +639,22 @@ class Pipeline:
     def get_weaviate_retriever(self):
         if not self.embed_model:
             # emburl, embkey, headers = self.get_emb_data()
-            self.embed_model = self.get_embed_model(self.valves.emb_end_point, self.valves.emb_api_key)
+            self.embed_model = self.get_embed_model(
+                self.valves.emb_end_point, self.valves.emb_api_key
+            )
 
         if not self.retriever:
             vector_store = WeaviateVectorStore(
-                            weaviate_client=self.weaviate_client, 
-                            index_name=f"D{self.valves.dataset}chunks",
-                            text_key=self.valves.textkey
-                        )
+                weaviate_client=self.weaviate_client,
+                index_name=f"D{self.valves.dataset}chunks",
+                text_key=self.valves.textkey,
+            )
             vector_index = VectorStoreIndex.from_vector_store(
-                            vector_store, 
-                            show_progress=True, 
-                            embed_model=self.embed_model
-                        )
-            self.retriever = vector_index.as_retriever(similarity_top_k=self.valves.top_k)
+                vector_store, show_progress=True, embed_model=self.embed_model
+            )
+            self.retriever = vector_index.as_retriever(
+                similarity_top_k=self.valves.top_k
+            )
 
     def get_nodes(self, user_message: str):
         if not user_message.startswith("### Task"):
@@ -571,11 +669,13 @@ class Pipeline:
 
         for no, node in enumerate(self.nodes):
             ref_str += f"{no + 1} [{node.metadata['file_name']} Page {node.metadata['page_no']}]({node.metadata['file_path']})\n\n"
-            ref_list.append({
-                    "document": node.metadata['file_name'],
+            ref_list.append(
+                {
+                    "document": node.metadata["file_name"],
                     "page": node.metadata["page_no"],
-                    "link": node.metadata["file_path"]
-                })
+                    "link": node.metadata["file_path"],
+                }
+            )
 
         return ref_str, ref_list
 
@@ -587,45 +687,38 @@ class Pipeline:
     def get_chat_history(self):
         pass
 
+    def mlflow_logging(self, question: str, answer: str, reference_list: List[Dict[str, Any]], nodes: List):
 
-    def mlflow_logging(self, answer: str):
-        ques_run_id = get_question_run_id(
-                self.mlflow_client, 
-                self.valves.mlflow_experiment_name,
-                self.valves.dataset + "-ragquery"
-            )
-
-        # Log nodes
         reference_nodes = []
-        for node in self.nodes:
+        for node in nodes:
             reference_nodes.append({"text": node.text, "metadata": node.metadata})
 
-        dict_log(
-            self.mlflow_client, ques_run_id, {"reference_nodes": reference_nodes}, "reference_nodes.json"
-        )
+        data = {
+                "experiment_name": self.valves.mlflow_experiment_name,
+                "dataset": self.valves.dataset,
+                "question": question,
+                "answer": answer,
+                "reference_list": reference_list,
+                "nodes": reference_nodes,
+                "config": self.valves.__dict__,
+            }
 
-        # Need to add mlflow dataset.
-        
-        # Log questions
-        dict_log(
-            self.mlflow_client, ques_run_id, {"question": self.question,}, "question.json",
-        )
+        requests.post(url="http://0.0.0.0:8000/mlflow_log", json=data)
 
-        # Log response
-        dict_log(
-            self.mlflow_client, ques_run_id, {"response": answer}, "answer.json"
-        )
-
-        # Log references
-        dict_log(
-            self.mlflow_client, ques_run_id, {"response_references": self.reference_list,}, "answer_references.json",
-        )
-        
-        # Log valves / config
-        dict_log(
-            self.mlflow_client, ques_run_id, self.valves.__dict__, "rag_config.json"
-        )
-
+        # mlflow_thread = Thread(
+        #     target=log_to_mlflow,
+        #     args=(
+        #         self.mlflow_client,
+        #         self.valves.mlflow_experiment_name,
+        #         self.valves.dataset,
+        #         nodes,
+        #         question,
+        #         answer,
+        #         reference_list,
+        #         self.valves.__dict__,
+        #     ),
+        # )
+        # mlflow_thread.start()
 
     def pipe(
         self, user_message: str, model_id: str, messages: List[dict], body: dict
@@ -647,9 +740,5 @@ class Pipeline:
         self.get_chat_engine()
 
         response = self.chat_engine.stream_chat(prompt)
-        print(prompt)
-        print("**"*10)
 
-        return response.response_gen
-
-
+        return response.response_gen, self.reference_list, self.nodes
